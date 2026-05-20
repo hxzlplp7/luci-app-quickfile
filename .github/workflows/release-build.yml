@@ -1,0 +1,74 @@
+name: Release Build
+
+on:
+  push:
+    tags:
+      - '*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build ${{ matrix.arch }}-${{ matrix.sdk }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sdk:
+          - openwrt-23.05
+          - openwrt-24.10
+        arch:
+          - x86_64
+          - aarch64_cortex-a53
+          - aarch64_cortex-a72
+          - aarch64_generic
+          - arm_cortex-a7_neon-vfpv4
+          - arm_cortex-a9
+          - arm_cortex-a15_neon-vfpv4
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Packages
+        uses: sbwml/openwrt-gh-action-sdk@go1.26
+        env:
+          ARCH: ${{ matrix.arch }}-${{ matrix.sdk }}
+          FEEDNAME: packages_ci
+          PACKAGES: quickfile luci-app-quickfile
+          NO_REFRESH_CHECK: true
+
+      - name: Organize Files
+        run: |
+          mkdir -p bin/packages
+          find bin/ -type f -name "*.ipk" -exec cp {} bin/packages/ \;
+          ls -R bin/packages
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.arch }}-${{ matrix.sdk }}-packages
+          path: bin/packages/*.ipk
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: tmp-packages
+
+      - name: Organize Release Files
+        run: |
+          mkdir -p release-packages
+          find tmp-packages/ -type f -name "*.ipk" -exec cp {} release-packages/ \;
+          cd release-packages
+          ls -lh
+
+      - name: Release
+        uses: ncipollo/release-action@v1
+        with:
+          allowUpdates: true
+          artifacts: "release-packages/*.ipk"
+          token: ${{ secrets.GITHUB_TOKEN }}
